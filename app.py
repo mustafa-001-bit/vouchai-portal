@@ -38,7 +38,7 @@ def get_secret_safely(key, default=""):
   return default
 
 
-# DEFENSIVE AMOUNT UPDATER (NEVER THROWS ATTRIBUTE ERROR)
+# DEFENSIVE AMOUNT UPDATER (CRASH-PROOF)
 def safe_update_amounts(target_school_id, roll_no, tuit, exam, arrear, other):
   if hasattr(db_manager, "update_student_amounts"):
     db_manager.update_student_amounts(
@@ -91,7 +91,7 @@ if not school_id:
     with st.form("school_access_form"):
       typed_code = st.text_input(
           "Institutional Campus Code / License ID:",
-          placeholder="e.g. learning_curve",
+          placeholder="e.g. learningcurve",
       )
       submit_access = st.form_submit_button(
           "Launch Terminal", type="primary", use_container_width=True
@@ -176,9 +176,11 @@ saved_note_6 = db_manager.get_setting(
     "6. Queries: Contact official accounts helpline during office hours.",
 )
 
-saved_gemini = db_manager.get_setting(
-    school_id, "GEMINI_API_KEY", get_secret_safely("GEMINI_API_KEY", "")
-)
+# SECURE GEMINI KEY LOGIC (PREVENTS KEY LEAK IN UI)
+cloud_gemini_key = get_secret_safely("GEMINI_API_KEY", "")
+db_saved_gemini = db_manager.get_setting(school_id, "GEMINI_API_KEY", "")
+gemini_api_key = db_saved_gemini if db_saved_gemini else cloud_gemini_key
+
 saved_instance = db_manager.get_setting(
     school_id, "WHATSAPP_INSTANCE_ID", get_secret_safely("WHATSAPP_INSTANCE_ID", "")
 )
@@ -385,7 +387,7 @@ if not st.session_state[auth_key]:
 
 
 # ==============================================================================
-# 6. SIDEBAR PROFILE & LOGO
+# 6. SIDEBAR PROFILE & SECURED SETTINGS
 # ==============================================================================
 st.sidebar.markdown(f"### 🏢 {default_school_title} Profile")
 in_school_name = st.sidebar.text_input("School / College Name", value=school_name)
@@ -497,18 +499,30 @@ if st.sidebar.button(
 
 st.sidebar.success("🟢 Official Dispatch Gateway: Active & Ready")
 
-# Terminal Security
+# Terminal Security (KEY NEVER LEAKS OUT TO CASHIERS)
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔑 Terminal Security")
-gemini_api_key_in = st.sidebar.text_input(
-    "Gemini API Key",
-    value=saved_gemini,
-    type="password",
-    key=f"gem_key_{school_id}",
-)
-if gemini_api_key_in != saved_gemini:
-  db_manager.set_setting(school_id, "GEMINI_API_KEY", gemini_api_key_in.strip())
-gemini_api_key = gemini_api_key_in.strip()
+
+if cloud_gemini_key:
+  st.sidebar.success("🟢 AI Vision: Secured & Linked via Cloud")
+  custom_gemini = st.sidebar.text_input(
+      "Override Key (Optional)",
+      value=db_saved_gemini,
+      type="password",
+      placeholder="Cloud Master Key Active",
+      key=f"gem_key_{school_id}",
+  )
+else:
+  custom_gemini = st.sidebar.text_input(
+      "Gemini API Key",
+      value=db_saved_gemini,
+      type="password",
+      placeholder="Paste Gemini API Key",
+      key=f"gem_key_{school_id}",
+  )
+
+if custom_gemini != db_saved_gemini:
+  db_manager.set_setting(school_id, "GEMINI_API_KEY", custom_gemini.strip())
 
 new_pin = st.sidebar.text_input(
     "Change Master PIN",
@@ -943,12 +957,11 @@ if not df.empty:
         st.info("Upload any transfer slip on the left to test verification.")
 
   # ------------------------------------------------------------------------------
-  # TAB 3: BANK VOUCHER ENGINE (FAST INSTANT DESIGNER & AUTO-PREVIEW)
+  # TAB 3: BANK VOUCHER ENGINE
   # ------------------------------------------------------------------------------
   with tab3:
     st.markdown("#### 🖨️ Bank Voucher Engine (4 Heads, Amount Editor & Notes)")
 
-    # Target Student for Instant Preview & Editing
     student_rolls = df["Roll_No"].tolist()
     edit_roll = st.selectbox(
         "Select Active Student for Preview & Customization:",
@@ -957,7 +970,6 @@ if not df.empty:
     )
     target_student_row = df[df["Roll_No"] == edit_roll].iloc[0]
 
-    # Pre-ensure at least ONE preview challan exists so right column is NEVER blank
     preview_file_name = f"Challan_{edit_roll}_{str(target_student_row['Student_Name']).replace(' ', '_')}.pdf"
     preview_full_path = os.path.join(school_challan_dir, preview_file_name)
 
@@ -970,7 +982,6 @@ if not df.empty:
     col_design, col_preview = st.columns([1.1, 1.3])
 
     with col_design:
-      # FAST DESIGNER FORM
       with st.form(key=f"fast_challan_designer_form_{school_id}"):
         st.markdown("##### 🏷️ 1. Customize 4 Fee Head Titles")
         d_c1, d_c2 = st.columns(2)
@@ -1031,7 +1042,6 @@ if not df.empty:
         )
 
       if submit_preview:
-        # 1. Update Database settings
         db_manager.set_setting(school_id, "FEE_HEAD_1", c_h1.strip())
         db_manager.set_setting(school_id, "FEE_HEAD_2", c_h2.strip())
         db_manager.set_setting(school_id, "FEE_HEAD_3", c_h3.strip())
@@ -1043,12 +1053,10 @@ if not df.empty:
         db_manager.set_setting(school_id, "CHALLAN_NOTE_5", c_n5.strip())
         db_manager.set_setting(school_id, "CHALLAN_NOTE_6", c_n6.strip())
 
-        # 2. Update Student Amounts safely without crashing
         safe_update_amounts(
             school_id, edit_roll, new_tuit, new_exam, new_arrear, new_other
         )
 
-        # 3. Regenerate preview challan immediately
         active_live_info = school_info.copy()
         active_live_info.update({
             "fee_head_1": c_h1.strip(),
@@ -1079,7 +1087,6 @@ if not df.empty:
 
       st.markdown("---")
 
-      # Bulk Apply Button
       if st.button(
           "⚡ Apply this Format to ALL Enrolled Challans (Bulk)",
           use_container_width=True,
@@ -1098,7 +1105,6 @@ if not df.empty:
         time.sleep(0.3)
         st.rerun()
 
-    # RIGHT COLUMN: GUARANTEED LIVE HIGH-RES PREVIEW (NEVER BLANK)
     with col_preview:
       st.markdown("##### 👁 Live High-Res Voucher Preview")
       if os.path.exists(preview_full_path):
@@ -1144,9 +1150,7 @@ if not df.empty:
   # ------------------------------------------------------------------------------
   with tab4:
     st.markdown("#### 🚀 Automated Bulk WhatsApp Voucher Dispatch")
-    helpline_str = (
-        f"\n📞 Accounts Office: {in_helpline}" if in_helpline else ""
-    )
+    helpline_str = f"\n📞 Accounts Office: {in_helpline}" if in_helpline else ""
 
     st.markdown(
         """<div class="gateway-panel">
@@ -1181,9 +1185,7 @@ Direct multi-recipient delivery engine initialized. Compiles fee breakdown, atta
           key=f"btn_send_all_{school_id}",
       ):
         target_df = (
-            df
-            if "ALL" in send_target
-            else df[df["Voucher_Dispatched"] != "Yes"]
+            df if "ALL" in send_target else df[df["Voucher_Dispatched"] != "Yes"]
         )
 
         if len(target_df) == 0:
@@ -1296,8 +1298,8 @@ Direct multi-recipient delivery engine initialized. Compiles fee breakdown, atta
       direct_msg = (
           f"Assalam-o-Alaikum,\nDear Parent, fee challan for"
           f" *{selected_row['Student_Name']}* (Roll: {selected_row['Roll_No']})"
-          f" of *PKR {int(selected_row['Gross_Dues']):,}* for"
-          f" *{in_billing_month}* is ready.\nDue Date:"
+          f" of *PKR {int(selected_row['Gross_Dues']):,}* for *{in_billing_month}*"
+          f" is ready.\nDue Date:"
           f" *{selected_row['Due_Date']}*.\nPayable via Bank / Easypaisa /"
           f" 1Bill.\n\n*{in_school_name}*{helpline_str}"
       )
@@ -1512,4 +1514,83 @@ Direct multi-recipient delivery engine initialized. Compiles fee breakdown, atta
         else:
           st.info("No receipts generated yet for this school.")
 else:
-  st.warning("Please upload a student fee Excel sheet to proceed.")
+  # ==============================================================================
+  # ELEGANT INSTITUTIONAL ONBOARDING SCREEN (ZERO-DATA STATE)
+  # ==============================================================================
+  st.markdown(
+      f"""
+    <div style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); padding: 36px; border-radius: 16px; color: white; text-align: center; margin-bottom: 25px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2);">
+        <h2 style="color: #F8FAFC; margin-bottom: 8px; font-weight: 800;">🏛️ Welcome to {in_school_name}</h2>
+        <p style="color: #94A3B8; font-size: 15px; max-width: 650px; margin: 0 auto;">
+            Dedicated Institutional Billing & Fee Clearance Terminal is active and ready. To initialize your student ledgers and generate bank challans, please load your active roster.
+        </p>
+    </div>
+    """,
+      unsafe_allow_html=True,
+  )
+
+  col_on1, col_on2 = st.columns([1, 1.2])
+
+  with col_on1:
+    st.markdown("### 📋 Step 1: Standard Excel Format")
+    st.write(
+        "Aapki sheet mein yeh columns hone zaroori hain taake system student"
+        " ledger, WhatsApp reminders aur vouchers khud bana sakay:"
+    )
+
+    st.markdown("""
+        - `Roll_No` (e.g. 101, 102)
+        - `Student_Name` (e.g. Ali Ahmed)
+        - `Father_Name`
+        - `Class` (e.g. 8th - A)
+        - `WhatsApp_No` (e.g. 03001234567)
+        - `Tuition_Fee`, `Exam_Fee`, `Arrears`
+        - `Due_Date` (e.g. 10-Oct-2026)
+        """)
+
+    sample_df = pd.DataFrame([{
+        "Roll_No": "101",
+        "Student_Name": "Muhammad Ali",
+        "Father_Name": "Tariq Mehmood",
+        "Class": "Grade 5",
+        "WhatsApp_No": "03001234567",
+        "Tuition_Fee": 5000,
+        "Exam_Fee": 1000,
+        "Arrears": 0,
+        "Other_Fee": 0,
+        "Due_Date": "10-Oct-2026",
+    }])
+    sample_buffer = io.BytesIO()
+    with pd.ExcelWriter(sample_buffer, engine="openpyxl") as writer:
+      sample_df.to_excel(writer, index=False, sheet_name="Students_Roster")
+
+    st.download_button(
+        label="📥 Download Sample Excel Template (.xlsx)",
+        data=sample_buffer.getvalue(),
+        file_name="Sample_Student_Roster.xlsx",
+        mime=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        use_container_width=True,
+    )
+
+  with col_on2:
+    st.markdown("### 🚀 Step 2: Upload Student Roster")
+    onboarding_file = st.file_uploader(
+        "Drop School Excel Sheet here to Initialize Portal:",
+        type=["xlsx", "xls"],
+        key=f"main_screen_roster_{school_id}",
+    )
+
+    if onboarding_file is not None:
+      excel_path = os.path.join(school_asset_dir, "students_roster.xlsx")
+      with open(excel_path, "wb") as f:
+        f.write(onboarding_file.getbuffer())
+
+      with st.spinner("Initializing database & configuring ledgers..."):
+        db_manager.reset_database_from_excel(school_id, excel_path)
+        time.sleep(0.5)
+
+      st.success("🎉 Roster loaded successfully! Launching Terminal...")
+      time.sleep(0.5)
+      st.rerun()
